@@ -8,7 +8,7 @@
 // Protected
 // addr needed for TMC2209
 #ifdef TMC_SERIAL_SWITCH
-  TMC2208Stepper::TMC2208Stepper(Stream * SerialPort, float RS, uint8_t addr, uint16_t mul_pin1, uint16_t mul_pin2) :
+  TMC2208Stepper::TMC2208Stepper(Stream1 * SerialPort, float RS, uint8_t addr, uint16_t mul_pin1, uint16_t mul_pin2) :
   	TMCStepper(RS),
   	slave_address(TMC2208_SLAVE_ADDR),
   	write_only(false)
@@ -20,7 +20,7 @@
   	}
 #endif
 
-TMC2208Stepper::TMC2208Stepper(Stream * SerialPort, float RS, uint8_t addr) :
+TMC2208Stepper::TMC2208Stepper(Stream1 * SerialPort, float RS, uint8_t addr) :
 	TMCStepper(RS),
 	slave_address(addr),
 	write_only(false)

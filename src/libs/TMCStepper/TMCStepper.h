@@ -1,5 +1,7 @@
 #pragma once
 
+#define MARLIN_COMPAT 1
+
 //#define TMCDEBUG
 
 #pragma GCC diagnostic push
@@ -10,14 +12,27 @@
 	#include <Arduino.h>
 #endif
 
-#include <Stream.h>
-#include <SPI.h>
+#ifndef MARLIN_COMPAT
 
-#if (__cplusplus == 201703L) && defined(__has_include)
-	#define SW_CAPABLE_PLATFORM __has_include(<SoftwareSerial.h>)
+    #include <Stream.h>
+    #include <SPI.h>
+
+    #if (__cplusplus == 201703L) && defined(__has_include)
+        #define SW_CAPABLE_PLATFORM __has_include(<SoftwareSerial.h>)
+    #else
+        #define SW_CAPABLE_PLATFORM defined(__AVR__) || defined(TARGET_LPC1768) || defined(ARDUINO_ARCH_STM32F1)
+    #endif
+
 #else
-	#define SW_CAPABLE_PLATFORM defined(__AVR__) || defined(TARGET_LPC1768) || defined(ARDUINO_ARCH_STM32F1)
-#endif
+
+    #undef SW_CAPABLE_PLATFORM
+	#include <stdint.h>
+	typedef uint8_t byte;
+    #include "libs/_compat/SPI_compat.h"
+    #include "libs/_compat/SoftwareSerial_compat2.h"
+
+#endif // !MARLIN_COMPAT
+
 
 #if SW_CAPABLE_PLATFORM
 	#include <SoftwareSerial.h>
@@ -811,9 +826,9 @@ class TMC5161Stepper : public TMC5160Stepper {
 class TMC2208Stepper : public TMCStepper {
 	public:
 	  #ifdef TMC_SERIAL_SWITCH
-	    TMC2208Stepper(Stream * SerialPort, float RS, uint8_t addr, uint16_t mul_pin1, uint16_t mul_pin2);
+	    TMC2208Stepper(Stream1 * SerialPort, float RS, uint8_t addr, uint16_t mul_pin1, uint16_t mul_pin2);
 	  #endif
-		TMC2208Stepper(Stream * SerialPort, float RS, bool) :
+		TMC2208Stepper(Stream1 * SerialPort, float RS, bool) :
 			TMC2208Stepper(SerialPort, RS, TMC2208_SLAVE_ADDR)
 			{}
 		#if SW_CAPABLE_PLATFORM
@@ -979,12 +994,12 @@ class TMC2208Stepper : public TMCStepper {
 		struct OTP_PROG_t 	{ constexpr static uint8_t address = 0x04; };
 		struct OTP_READ_t 	{ constexpr static uint8_t address = 0x05; };
 
-		TMC2208Stepper(Stream * SerialPort, float RS, uint8_t addr);
+		TMC2208Stepper(Stream1 * SerialPort, float RS, uint8_t addr);
 		#if SW_CAPABLE_PLATFORM
 			TMC2208Stepper(uint16_t SW_RX_pin, uint16_t SW_TX_pin, float RS, uint8_t addr, bool has_rx);
 		#endif
 
-		Stream * HWSerial = NULL;
+		Stream1 * HWSerial = NULL;
 		#if SW_CAPABLE_PLATFORM
 			SoftwareSerial * SWSerial = NULL;
 		#endif
@@ -1010,7 +1025,7 @@ class TMC2208Stepper : public TMCStepper {
 
 class TMC2209Stepper : public TMC2208Stepper {
 	public:
-		TMC2209Stepper(Stream * SerialPort, float RS, uint8_t addr) :
+		TMC2209Stepper(Stream1 * SerialPort, float RS, uint8_t addr) :
 			TMC2208Stepper(SerialPort, RS, addr) {}
 
 		#if SW_CAPABLE_PLATFORM
