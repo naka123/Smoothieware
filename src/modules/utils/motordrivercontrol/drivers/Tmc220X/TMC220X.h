@@ -82,14 +82,14 @@ private:
 //    inline void send262(unsigned long datagram);
 //    std::function<int(uint8_t *b, int cnt, uint8_t *r)> spi;
 
-    unsigned int resistor{50}; // current sense resitor value in milliohm
+    float resistor; // current sense resitor value in ohm
 
     //driver control register copies to easily set & modify the registers
-    unsigned long driver_control_register_value;
-    unsigned long chopper_config_register;
-    unsigned long cool_step_register_value;
-    unsigned long stall_guard2_current_register_value;
-    unsigned long driver_configuration_register_value;
+
+    TMC2208_n::GCONF_t gconf; //{0};
+    TMC2208_n::CHOPCONF_t chopconf; //{0};
+    TMC2208_n::PWMCONF_t pwmconf; //{0};
+
     //the driver status result
     unsigned long driver_status_result;
 

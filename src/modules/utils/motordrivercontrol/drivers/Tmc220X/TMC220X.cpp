@@ -23,7 +23,7 @@
 //some default values used in initialization
 #define DEFAULT_MICROSTEPPING_VALUE 32
 #define DEFAULT_CURRENT_VALUE 500
-#define DEFAULT_RSENSE_VALUE 110
+#define DEFAULT_RSENSE_VALUE 0.11f
 
 TMC220X::TMC220X(char d)
 {
@@ -50,8 +50,12 @@ void TMC220X::init(uint16_t cs)
     const uint32_t thrs = 255;
     const bool stealth = false;
 
+    memset(&gconf, 0, sizeof(gconf));
+    memset(&chopconf, 0, sizeof(chopconf));
+    memset(&pwmconf, 0, sizeof(pwmconf));
+
     // read chip specific config entries
-    this->resistor= THEKERNEL->config->value(motor_driver_control_checksum, cs, sense_resistor_checksum)->by_default(DEFAULT_RSENSE_VALUE)->as_number(); // in milliohms
+    this->resistor= THEKERNEL->config->value(motor_driver_control_checksum, cs, sense_resistor_checksum)->by_default(DEFAULT_RSENSE_VALUE)->as_number(); // in ohms
     int mA= THEKERNEL->config->value(motor_driver_control_checksum, cs, current_checksum)->by_default(DEFAULT_CURRENT_VALUE)->as_number();
     microsteps= THEKERNEL->config->value(motor_driver_control_checksum, cs, microsteps_checksum)->by_default(DEFAULT_MICROSTEPPING_VALUE)->as_number();
 
@@ -80,24 +84,20 @@ void TMC220X::init(uint16_t cs)
         delete smoothie_pin;
     }
 
-    THEKERNEL->streams->printf("tx_pin: %d, rx_pin: %d, NC: %d\n", tx_pin, rx_pin, NC);
-
-
     serial_stream= new SoftwareSerial(tx_pin, rx_pin);
     serial_stream->begin(19200);
 
     tmc2208Stepper = new TMC2208Stepper(serial_stream, this->resistor, false);
-
-    TMC2208_n::GCONF_t gconf{0};
 
     gconf.pdn_disable = true; // Use UART
     gconf.mstep_reg_select = true; // Select microsteps with UART
     gconf.i_scale_analog = false;
     gconf.en_spreadcycle = !stealth;
     tmc2208Stepper->GCONF(gconf.sr);
+    tmc2208Stepper->push();
+
 //    tmc2208Stepper->stored.stealthChop_enabled = stealth;
 
-    TMC2208_n::CHOPCONF_t chopconf{0};
     chopconf.tbl = 0b01; // blank_time = 24
     chopconf.toff = chopper_timing.toff;
     chopconf.intpol = INTERPOLATE;
@@ -107,13 +107,13 @@ void TMC220X::init(uint16_t cs)
     chopconf.dedge = true;
 #endif
     tmc2208Stepper->CHOPCONF(chopconf.sr);
+    tmc2208Stepper->push();
 
     tmc2208Stepper->rms_current(mA, HOLD_MULTIPLIER);
     tmc2208Stepper->microsteps(microsteps);
     tmc2208Stepper->iholddelay(10);
     tmc2208Stepper->TPOWERDOWN(128); // ~2s until driver lowers to hold current
 
-    TMC2208_n::PWMCONF_t pwmconf{0};
     pwmconf.pwm_lim = 12;
     pwmconf.pwm_reg = 8;
     pwmconf.pwm_autograd = true;
@@ -122,6 +122,7 @@ void TMC220X::init(uint16_t cs)
     pwmconf.pwm_grad = 14;
     pwmconf.pwm_ofs = 36;
     tmc2208Stepper->PWMCONF(pwmconf.sr);
+    tmc2208Stepper->push();
 
 #ifdef HYBRID_THRESHOLD
     tmc2208Stepper->set_pwm_thrs(thrs);
@@ -151,9 +152,6 @@ started = true;
 //#endif
 
     setEnabled(false);
-
-    //set a nice microstepping value
-    setMicrosteps(DEFAULT_MICROSTEPPING_VALUE);
 
 //    // set stallguard to a conservative value so it doesn't trigger immediately
 //    setStallGuardThreshold(10, 1);
@@ -280,6 +278,7 @@ unsigned int TMC220X::getCurrent(void)
  */
 void TMC220X::setMicrosteps(int number_of_steps)
 {
+    THEKERNEL->streams->printf("TMC220X::setMicrosteps number_of_steps: %d\n", number_of_steps);
     tmc2208Stepper->microsteps(number_of_steps);
     tmc2208Stepper->push();
     microsteps = number_of_steps;
@@ -295,19 +294,9 @@ int TMC220X::getMicrosteps(void)
 
 void TMC220X::setStepInterpolation(int8_t value)
 {
-
-    TMC2208_n::CHOPCONF_t chopconf{0};
-    chopconf.tbl = 0b01; // blank_time = 24
-    chopconf.toff = chopper_timing.toff;
-    chopconf.intpol = value?INTERPOLATE:0;
-    chopconf.hend = chopper_timing.hend + 3;
-    chopconf.hstrt = chopper_timing.hstrt - 1;
-#ifdef SQUARE_WAVE_STEPPING
-    chopconf.dedge = true;
-#endif
+    THEKERNEL->streams->printf("TMC220X::setStepInterpolation value: %d\n", value);
+    chopconf.intpol = (bool)value;
     tmc2208Stepper->CHOPCONF(chopconf.sr);
-
-
     tmc2208Stepper->push();
 }
 
@@ -317,32 +306,32 @@ void TMC220X::setStepInterpolation(int8_t value)
 // FIXME status registers not reading back correctly, check docs
 bool TMC220X::setRawRegister(StreamOutput *stream, uint32_t reg, uint32_t val)
 {
-    switch(reg) {
-        case 255:
-//            send262(driver_control_register_value);
-//            send262(chopper_config_register);
-//            send262(cool_step_register_value);
-//            send262(stall_guard2_current_register_value);
-//            send262(driver_configuration_register_value);
-            stream->printf("Registers written\n");
-            break;
-
-
-        case 1: driver_control_register_value = val; stream->printf("driver control register set to %08lX\n", val); break;
-        case 2: chopper_config_register = val; stream->printf("chopper config register set to %08lX\n", val); break;
-        case 3: cool_step_register_value = val; stream->printf("cool step register set to %08lX\n", val); break;
-        case 4: stall_guard2_current_register_value = val; stream->printf("stall guard2 current register set to %08lX\n", val); break;
-        case 5: driver_configuration_register_value = val; stream->printf("driver configuration register set to %08lX\n", val); break;
-
-        default:
-            stream->printf("1: driver control register\n");
-            stream->printf("2: chopper config register\n");
-            stream->printf("3: cool step register\n");
-            stream->printf("4: stall guard2 current register\n");
-            stream->printf("5: driver configuration register\n");
-            stream->printf("255: update all registers\n");
-            return false;
-    }
+//    switch(reg) {
+//        case 255:
+////            send262(driver_control_register_value);
+////            send262(chopper_config_register);
+////            send262(cool_step_register_value);
+////            send262(stall_guard2_current_register_value);
+////            send262(driver_configuration_register_value);
+//            stream->printf("Registers written\n");
+//            break;
+//
+//
+//        case 1: driver_control_register_value = val; stream->printf("driver control register set to %08lX\n", val); break;
+//        case 2: chopper_config_register = val; stream->printf("chopper config register set to %08lX\n", val); break;
+//        case 3: cool_step_register_value = val; stream->printf("cool step register set to %08lX\n", val); break;
+//        case 4: stall_guard2_current_register_value = val; stream->printf("stall guard2 current register set to %08lX\n", val); break;
+//        case 5: driver_configuration_register_value = val; stream->printf("driver configuration register set to %08lX\n", val); break;
+//
+//        default:
+//            stream->printf("1: driver control register\n");
+//            stream->printf("2: chopper config register\n");
+//            stream->printf("3: cool step register\n");
+//            stream->printf("4: stall guard2 current register\n");
+//            stream->printf("5: driver configuration register\n");
+//            stream->printf("255: update all registers\n");
+//            return false;
+//    }
     return true;
 }
 
