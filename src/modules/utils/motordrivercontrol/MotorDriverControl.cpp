@@ -16,6 +16,7 @@
 #include "mbed.h" // for SPI
 
 #include "drivers/TMC26X/TMC26X.h"
+#include "drivers/TMC220X/TMC220X.h"
 #include "drivers/DRV8711/drv8711.h"
 
 #include <string>
@@ -80,66 +81,85 @@ bool MotorDriverControl::config_module(uint16_t cs)
             return false; // axis/axis required
         }
     }
+
+    std::string chip_name = THEKERNEL->config->value( motor_driver_control_checksum, cs, chip_checksum)->by_default("")->as_string();
+    if(chip_name.empty()) {
+        THEKERNEL->streams->printf("MotorDriverControl %c ERROR: chip type not defined\n", axis);
+        return false; // chip type required
+    }
+
+    const bool use_spi = chip_name != "TMC2208";
+    THEKERNEL->streams->printf("MotorDriverControl chip: %s\n", chip_name.c_str());
+
     axis= str[0];
     if( !((axis >= 'X' && axis <= 'Z') || (axis >= 'A' && axis <= 'C')) ) {
         THEKERNEL->streams->printf("MotorDriverControl ERROR: axis must be one of XYZABC\n");
         return false; // axis is illegal
     }
 
-    spi_cs_pin.from_string(THEKERNEL->config->value( motor_driver_control_checksum, cs, spi_cs_pin_checksum)->by_default("nc")->as_string())->as_output();
-    if(!spi_cs_pin.connected()) {
-        THEKERNEL->streams->printf("MotorDriverControl %c ERROR: chip select not defined\n", axis);
-        return false; // if not defined then we can't use this instance
-    }
-    spi_cs_pin.set(1);
-
-
-    str= THEKERNEL->config->value( motor_driver_control_checksum, cs, chip_checksum)->by_default("")->as_string();
-    if(str.empty()) {
-        THEKERNEL->streams->printf("MotorDriverControl %c ERROR: chip type not defined\n", axis);
-        return false; // chip type required
+    if(use_spi) {
+        spi_cs_pin.from_string(THEKERNEL->config->value( motor_driver_control_checksum, cs, spi_cs_pin_checksum)->by_default("nc")->as_string())->as_output();
+        if (!spi_cs_pin.connected()) {
+            THEKERNEL->streams->printf("MotorDriverControl %c ERROR: chip select not defined\n", axis);
+            return false; // if not defined then we can't use this instance
+        }
+        spi_cs_pin.set(1);
     }
 
     using std::placeholders::_1;
     using std::placeholders::_2;
     using std::placeholders::_3;
 
-    if(str == "DRV8711") {
+    if(chip_name == "DRV8711") {
         chip= DRV8711;
         drv8711= new DRV8711DRV(std::bind( &MotorDriverControl::sendSPI, this, _1, _2, _3), axis);
 
-    }else if(str == "TMC2660") {
+    }else if(chip_name == "TMC2660") {
         chip= TMC2660;
         tmc26x= new TMC26X(std::bind( &MotorDriverControl::sendSPI, this, _1, _2, _3), axis);
+
+    }else if(chip_name == "TMC2208") {
+        chip= TMC2208;
+        tmc220x= new TMC220X(axis);
 
     }else{
         THEKERNEL->streams->printf("MotorDriverControl %c ERROR: Unknown chip type: %s\n", axis, str.c_str());
         return false;
     }
 
-    // select which SPI channel to use
-    int spi_channel = THEKERNEL->config->value(motor_driver_control_checksum, cs, spi_channel_checksum)->by_default(1)->as_number();
-    int spi_frequency = THEKERNEL->config->value(motor_driver_control_checksum, cs, spi_frequency_checksum)->by_default(1000000)->as_number();
+    if(use_spi) {
+        // select which SPI channel to use
+        int spi_channel = THEKERNEL->config->value(motor_driver_control_checksum, cs, spi_channel_checksum)->by_default(
+                1)->as_number();
+        int spi_frequency = THEKERNEL->config->value(motor_driver_control_checksum, cs,
+                                                     spi_frequency_checksum)->by_default(1000000)->as_number();
 
-    // select SPI channel to use
-    PinName mosi, miso, sclk;
-    if(spi_channel == 0) {
-        mosi = P0_18; miso = P0_17; sclk = P0_15;
-    } else if(spi_channel == 1) {
-        mosi = P0_9; miso = P0_8; sclk = P0_7;
-    } else {
-        THEKERNEL->streams->printf("MotorDriverControl %c ERROR: Unknown SPI Channel: %d\n", axis, spi_channel);
-        return false;
+        // select SPI channel to use
+        PinName mosi, miso, sclk;
+        if (spi_channel == 0) {
+            mosi = P0_18;
+            miso = P0_17;
+            sclk = P0_15;
+        } else if (spi_channel == 1) {
+            mosi = P0_9;
+            miso = P0_8;
+            sclk = P0_7;
+        } else {
+            THEKERNEL->streams->printf("MotorDriverControl %c ERROR: Unknown SPI Channel: %d\n", axis, spi_channel);
+            return false;
+        }
+
+        this->spi = new mbed::SPI(mosi, miso, sclk);
+        this->spi->frequency(spi_frequency);
+        this->spi->format(8, 3); // 8bit, mode3
+
     }
-
-    this->spi = new mbed::SPI(mosi, miso, sclk);
-    this->spi->frequency(spi_frequency);
-    this->spi->format(8, 3); // 8bit, mode3
 
     // set default max currents for each chip, can be overidden in config
     switch(chip) {
         case DRV8711: max_current= 4000; break;
         case TMC2660: max_current= 3000; break;
+        case TMC2208: max_current= 1500; break;
     }
 
     max_current= THEKERNEL->config->value(motor_driver_control_checksum, cs, max_current_checksum )->by_default((int)max_current)->as_number(); // in mA
@@ -164,6 +184,7 @@ bool MotorDriverControl::config_module(uint16_t cs)
                 switch(chip) {
                     case DRV8711: drv8711->set_raw_register(&StreamOutput::NullStream, ++reg, i); break;
                     case TMC2660: tmc26x->setRawRegister(&StreamOutput::NullStream, ++reg, i); break;
+                    case TMC2208: tmc220x->setRawRegister(&StreamOutput::NullStream, ++reg, i); break;
                 }
             }
 
@@ -171,6 +192,7 @@ bool MotorDriverControl::config_module(uint16_t cs)
             switch(chip) {
                 case DRV8711: drv8711->set_raw_register(&StreamOutput::NullStream, 255, 0); break;
                 case TMC2660: tmc26x->setRawRegister(&StreamOutput::NullStream, 255, 0); break;
+                case TMC2208: tmc220x->setRawRegister(&StreamOutput::NullStream, 255, 0); break;
             }
         }
 
@@ -189,7 +211,7 @@ bool MotorDriverControl::config_module(uint16_t cs)
         this->register_for_event(ON_SECOND_TICK);
     }
 
-    THEKERNEL->streams->printf("MotorDriverControl INFO: configured motor %c (%d): as %s, cs: %04X\n", axis, id, chip==TMC2660?"TMC2660":chip==DRV8711?"DRV8711":"UNKNOWN", (spi_cs_pin.port_number<<8)|spi_cs_pin.pin);
+    THEKERNEL->streams->printf("MotorDriverControl INFO: configured motor %c (%d): as %s, cs: %04X\n", axis, id, chip==TMC2660?"TMC2660":chip==TMC2208?"TMC2208":chip==DRV8711?"DRV8711":"UNKNOWN", (spi_cs_pin.port_number<<8)|spi_cs_pin.pin);
 
     return true;
 }
@@ -243,6 +265,11 @@ void MotorDriverControl::on_second_tick(void *argument)
         case TMC2660:
             alarm= tmc26x->checkAlarm();
             break;
+
+        case TMC2208:
+            alarm= tmc220x->checkAlarm();
+            break;
+
     }
 
     if(halt_on_alarm && alarm) {
@@ -349,6 +376,12 @@ void MotorDriverControl::initialize_chip(uint16_t cs)
         set_current(current);
         set_microstep(microsteps);
         //set_decay_mode(decay_mode);
+
+    }else if(chip == TMC2208){
+        tmc220x->init(cs);
+        set_current(current);
+        set_microstep(microsteps);
+        //set_decay_mode(decay_mode);
     }
 
 }
@@ -364,6 +397,11 @@ void MotorDriverControl::set_current(uint32_t c)
         case TMC2660:
             tmc26x->setCurrent(c);
             break;
+
+        case TMC2208:
+            tmc220x->setCurrent(c);
+            break;
+
     }
 }
 
@@ -380,6 +418,12 @@ uint32_t MotorDriverControl::set_microstep( uint32_t n )
             tmc26x->setMicrosteps(n);
             m= tmc26x->getMicrosteps();
             break;
+
+        case TMC2208:
+            tmc220x->setMicrosteps(n);
+            m= tmc220x->getMicrosteps();
+            break;
+
     }
     return m;
 }
@@ -390,6 +434,7 @@ void MotorDriverControl::set_decay_mode( uint8_t dm )
     switch(chip) {
         case DRV8711: break;
         case TMC2660: break;
+        case TMC2208: break;
     }
 }
 
@@ -403,6 +448,11 @@ void MotorDriverControl::enable(bool on)
         case TMC2660:
             tmc26x->setEnabled(on);
             break;
+
+        case TMC2208:
+            tmc220x->setEnabled(on);
+            break;
+
     }
 }
 
@@ -416,6 +466,11 @@ void MotorDriverControl::dump_status(StreamOutput *stream, bool b)
         case TMC2660:
             tmc26x->dumpStatus(stream, b);
             break;
+
+        case TMC2208:
+            tmc220x->dumpStatus(stream, b);
+            break;
+
     }
 }
 
@@ -425,6 +480,7 @@ void MotorDriverControl::set_raw_register(StreamOutput *stream, uint32_t reg, ui
     switch(chip) {
         case DRV8711: ok= drv8711->set_raw_register(stream, reg, val); break;
         case TMC2660: ok= tmc26x->setRawRegister(stream, reg, val); break;
+        case TMC2208: ok= tmc220x->setRawRegister(stream, reg, val); break;
     }
     if(ok) {
         stream->printf("register operation succeeded\n");
@@ -458,6 +514,28 @@ void MotorDriverControl::set_options(Gcode *gcode)
             // }
         }
         break;
+
+        case TMC2208: {
+            TMC220X::options_t options= gcode->get_args_int();
+            if(options.size() > 0) {
+                if(tmc220x->set_options(options)) {
+                    gcode->stream->printf("options set\n");
+                }else{
+                    gcode->stream->printf("failed to set any options\n");
+                }
+            }
+            // options.clear();
+            // if(tmc26x->get_optional(options)) {
+            //     // foreach optional value
+            //     for(auto &i : options) {
+            //         // print all current values of supported options
+            //         gcode->stream->printf("%c: %d ", i.first, i.second);
+            //         gcode->add_nl = true;
+            //     }
+            // }
+        }
+        break;
+
     }
 }
 

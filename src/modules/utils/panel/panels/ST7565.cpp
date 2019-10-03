@@ -326,15 +326,19 @@ void ST7565::init()
 
     }else{
         const unsigned char init_seq[] = {
+            0xE2,    //System reset
             0x40,    //Display start line 0
             (unsigned char)((reversed^is_sh1106) ? 0xa0 : 0xa1), // ADC
             (unsigned char)(reversed ? 0xc8 : 0xc0), // COM select
             0xa6,    //Display normal
             0xa2,    //Set Bias 1/9 (Duty 1/65)
-            0x2f,    //Booster, Regulator and Follower On
+            0x2C,    //Boost ON
+            0x2E,    //Voltage regulator on
+            0x2F,    //Voltage follower on
             0xf8,    //Set internal Booster to 4x
             0x00,
-            0x27,    //Contrast set
+            0x23,    //Set resistor ratio (3)
+            //0x27,  //Contrast set
             0x81,
             this->contrast,    //contrast value
             0xac,    //No indicator
@@ -350,7 +354,8 @@ void ST7565::init()
 void ST7565::setContrast(uint8_t c)
 {
     const unsigned char contrast_seq[] = {
-        0x27,    //Contrast set
+        0x23, //Set resistor ratio (3)
+        //0x27,    //Contrast set
         0x81,
         c    //contrast value
     };

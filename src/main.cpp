@@ -6,6 +6,7 @@
 */
 
 #include "libs/Kernel.h"
+#include "libs/_compat/millis.h"
 
 #include "modules/tools/laser/Laser.h"
 #include "modules/tools/spindle/SpindleMaker.h"
@@ -91,6 +92,8 @@ GPIO leds[5] = {
 };
 
 void init() {
+
+    millisStart();
 
     // Default pins to low status
     for (int i = 0; i < 5; i++){
