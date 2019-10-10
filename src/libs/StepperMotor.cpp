@@ -10,8 +10,14 @@
 #include "MRI_Hooks.h"
 #include "StepTicker.h"
 
+#include "ConfigValue.h"
+#include "Config.h"
+#include "checksumm.h"
+
 #include <math.h>
 #include "mbed.h"
+
+#define delta_homing_checksum            CHECKSUM("delta_homing")
 
 StepperMotor::StepperMotor(Pin &step, Pin &dir, Pin &en) : step_pin(step), dir_pin(dir), en_pin(en)
 {
@@ -34,6 +40,8 @@ StepperMotor::StepperMotor(Pin &step, Pin &dir, Pin &en) : step_pin(step), dir_p
     unstep(); // initialize step pin
     set_direction(false); // initialize dir pin
 
+    this->is_delta=  THEKERNEL->config->value(delta_homing_checksum)->by_default(false)->as_bool();
+
     this->register_for_event(ON_HALT);
     this->register_for_event(ON_ENABLE);
 }
@@ -47,7 +55,9 @@ StepperMotor::~StepperMotor()
 void StepperMotor::on_halt(void *argument)
 {
     if(argument == nullptr) {
-        enable(false);
+        if (!this->is_delta) {
+            enable(false);
+        }
         moving= false;
     }
 }

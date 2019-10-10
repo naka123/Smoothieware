@@ -73,6 +73,7 @@ class StepperMotor  : public Module {
         volatile int32_t current_position_steps;
         int32_t last_milestone_steps;
         float   last_milestone_mm;
+        bool    is_delta;
 
         volatile struct {
             uint8_t motor_id:8;
